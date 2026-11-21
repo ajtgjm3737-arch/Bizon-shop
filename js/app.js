@@ -168,6 +168,7 @@
 
   /* ---------- Общие куски разметки ---------- */
   function askUrl(p) { return 'https://t.me/' + CFG.MANAGER_USERNAME + '?text=' + encodeURIComponent('Здравствуйте! Сколько стоит ' + p.name + ' (' + BRANDS[p.brand] + ', ' + p.size + ')?'); }
+  function waitUrl(p) { return 'https://t.me/' + CFG.MANAGER_USERNAME + '?text=' + encodeURIComponent('Здравствуйте! Напишите, когда появится ' + p.name + ' (' + BRANDS[p.brand] + ', ' + p.size + ').'); }
   function price(p) { return p.price ? rub(p.price) : '<small class="price__ask">Цена у менеджера</small>'; }
   function buyCtl(p, dark) {
     if (p.stock === false) return '';
@@ -453,7 +454,7 @@
         '<p>' + esc(a.short) + '</p><button class="link" data-act="article" data-id="' + a.id + '">Разбор в базе знаний ' + I.right + '</button></div>';
     }
     h += '<div class="pd__buy"><span class="price">' + price(p) + '</span>';
-    if (p.stock === false) h += '<button class="btn" disabled>Нет в наличии</button>';
+    if (p.stock === false) h += '<button class="btn" data-act="link" data-id="' + esc(waitUrl(p)) + '">Сообщить о поступлении</button>';
     else if (!p.price) h += '<button class="btn btn--amber" data-act="link" data-id="' + esc(askUrl(p)) + '">Узнать цену</button>';
     else if (q) h += buyCtl(p);
     else h += '<button class="btn btn--amber" data-act="add" data-id="' + p.id + '">В корзину</button>';
