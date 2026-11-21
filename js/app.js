@@ -7,6 +7,13 @@
   var PRODUCTS = window.BIZON_PRODUCTS;
   var CATS = window.BIZON_CATEGORIES;
   var BRANDS = window.BIZON_BRANDS;
+  var GOALS = window.BIZON_CONFIG.GOALS || [];
+  function fitsGoal(p) {
+    if (ui.goal === 'all') return true;
+    if (p.goals) return p.goals.indexOf(ui.goal) >= 0;
+    var g = GOALS.filter(function (x) { return x.id === ui.goal; })[0];
+    return !!g && g.cats.indexOf(p.cat) >= 0;
+  }
   var KB = window.BIZON_KB;
   var KB_GROUPS = window.BIZON_KB_GROUPS;
 
@@ -21,21 +28,21 @@
   var STORE_KEY = 'bizon:v1';
   var state = {
     cart: {}, fav: [], orders: [], stack: [], log: {}, promo: '',
-    form: { name: '', phone: '', delivery: CFG.DELIVERY[0].id, city: '', comment: '' }
+    form: { name: '', phone: '', delivery: CFG.DELIVERY[0].id, city: '', address: '', comment: '' }
   };
   try {
     var saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
     if (saved && typeof saved === 'object') {
       Object.keys(state).forEach(function (k) { if (saved[k] != null) state[k] = saved[k]; });
-      state.form = Object.assign({ name: '', phone: '', delivery: CFG.DELIVERY[0].id, city: '', comment: '' }, saved.form || {});
+      state.form = Object.assign({ name: '', phone: '', delivery: CFG.DELIVERY[0].id, city: '', address: '', comment: '' }, saved.form || {});
     }
   } catch (e) { /* хранилище недоступно — работаем без сохранения */ }
-  Object.keys(state.cart).forEach(function (id) { if (!byId[id] || byId[id].stock === false) delete state.cart[id]; });
+  Object.keys(state.cart).forEach(function (id) { if (!byId[id] || byId[id].stock === false || !byId[id].price) delete state.cart[id]; });
   if (!CFG.PROMO_CODES[state.promo]) state.promo = '';
 
   function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ } }
 
-  var ui = { tab: 'catalog', sub: null, brand: 'all', kbGroup: 'all', day: dayKey(new Date()), sheet: null, scroll: {}, errors: {}, promoInput: '', promoErr: '', sending: false };
+  var ui = { tab: 'catalog', sub: null, goal: 'all', kbGroup: 'all', day: dayKey(new Date()), sheet: null, scroll: {}, errors: {}, promoInput: '', promoErr: '', sending: false };
 
   /* ---------- Утилиты ---------- */
   function esc(s) {
@@ -132,7 +139,7 @@
     var fs = p.pack === 'tub' || p.pack === 'bag' ? 12 : 10.500;
     var maxW = bw - 10;
     var y0 = top + (lines.length > 1 ? 44 : 50);
-    var t = '<rect x="' + (bx + 0.500) + '" y="' + (top + 16) + '" width="' + (bw - 1) + '" height="2.400" fill="#d9a566"/>' +
+    var t = '<rect x="' + (bx + 0.500) + '" y="' + (top + 16) + '" width="' + (bw - 1) + '" height="2.400" fill="#d8c39a"/>' +
       '<text x="60" y="' + (top + 30) + '" text-anchor="middle" font-size="5.200" letter-spacing="1.300" fill="#8f8676">' + tag + '</text>';
     lines.forEach(function (ln, i) {
       var est = ln.length * fs * 0.540;
@@ -160,8 +167,11 @@
   }
 
   /* ---------- Общие куски разметки ---------- */
+  function askUrl(p) { return 'https://t.me/' + CFG.MANAGER_USERNAME + '?text=' + encodeURIComponent('Здравствуйте! Сколько стоит ' + p.name + ' (' + BRANDS[p.brand] + ', ' + p.size + ')?'); }
+  function price(p) { return p.price ? rub(p.price) : '<small class="price__ask">Цена у менеджера</small>'; }
   function buyCtl(p, dark) {
     if (p.stock === false) return '';
+    if (!p.price) return '<button class="plus" data-act="link" data-id="' + esc(askUrl(p)) + '" aria-label="Узнать цену">?</button>';
     var q = state.cart[p.id] || 0;
     if (!q) return '<button class="plus" data-act="add" data-id="' + p.id + '" aria-label="Добавить в корзину">' + I.plus + '</button>';
     return '<span class="step' + (dark ? ' step--dark' : '') + '">' +
@@ -178,7 +188,7 @@
       '<h3 class="card__name">' + esc(p.name) + '</h3>' +
       '<p class="card__brand">' + esc(BRANDS[p.brand]) + '</p>' +
       '<p class="card__size">' + esc(p.size) + '</p>' +
-      '<div class="card__foot"><span class="price">' + rub(p.price) + '</span>' + buyCtl(p) + '</div>' +
+      '<div class="card__foot"><span class="price">' + price(p) + '</span>' + buyCtl(p) + '</div>' +
     '</article>';
   }
   function evBars(ev) { return '<span class="ev ev--' + ev + '" aria-hidden="true"><i></i><i></i><i></i></span>'; }
@@ -196,14 +206,14 @@
   /* ---------- Экран: каталог ---------- */
   function viewCatalog() {
     var h = '<section class="hero"><div class="hero__text">' +
-      '<h1 class="hero__h">Только то, что работает</h1>' +
-      '<p class="hero__p">Optimum Nutrition, Scitec и NOW. К каждой добавке — разбор по исследованиям.</p>' +
+      '<h1 class="hero__h">Только оригинальный товар</h1>' +
+      '<p class="hero__p">Проверяем каждую партию и расскажем про каждую добавку — по исследованиям.</p>' +
       '</div></section>';
-    h += '<div class="chips">' + chip('brand', 'all', 'Все бренды', ui.brand);
-    Object.keys(BRANDS).forEach(function (b) { h += chip('brand', b, BRANDS[b], ui.brand); });
+    h += '<div class="chips">' + chip('goal', 'all', 'Все', ui.goal);
+    GOALS.forEach(function (g) { h += chip('goal', g.id, g.title, ui.goal); });
     h += '</div>';
     CATS.forEach(function (c) {
-      var list = PRODUCTS.filter(function (p) { return p.cat === c.id && (ui.brand === 'all' || p.brand === ui.brand); });
+      var list = PRODUCTS.filter(function (p) { return p.cat === c.id && fitsGoal(p); });
       if (!list.length) return;
       h += '<section class="cat" id="cat-' + c.id + '"><h2 class="cat__h">' + esc(c.title) + '</h2><p class="cat__p">' + esc(c.text) + '</p>' +
         '<div class="grid">' + list.map(card).join('') + '</div></section>';
@@ -215,6 +225,8 @@
   }
 
   /* ---------- Экран: корзина ---------- */
+  function curDelivery() { return CFG.DELIVERY.filter(function (d) { return d.id === state.form.delivery; })[0] || CFG.DELIVERY[0]; }
+  function isLocal() { return !!curDelivery().local; }
   function field(key, label, attrs, value) {
     var err = ui.errors[key];
     return '<div class="field' + (err ? ' is-bad' : '') + '" id="f-' + key + '"><label for="i-' + key + '">' + label + '</label>' +
@@ -245,12 +257,15 @@
 
     var f = state.form;
     h += '<div class="form">' +
-      field('name', 'Фамилия и имя получателя', 'placeholder="Иванов Иван" autocomplete="name" enterkeyhint="next"', f.name) +
+      (isLocal() ? field('name', 'Имя', 'placeholder="Как к вам обращаться" autocomplete="given-name" enterkeyhint="next"', f.name)
+        : field('name', 'Фамилия и имя получателя', 'placeholder="Иванов Иван" autocomplete="name" enterkeyhint="next"', f.name)) +
       field('phone', 'Телефон', 'placeholder="+7 (___) ___-__-__" inputmode="tel" autocomplete="tel" enterkeyhint="next"', f.phone) +
       '<div class="field"><span class="field__label">Способ доставки</span><div class="seg">' +
         CFG.DELIVERY.map(function (d) { return '<button class="' + (f.delivery === d.id ? 'is-on' : '') + '" data-act="delivery" data-id="' + d.id + '">' + esc(d.title) + '</button>'; }).join('') +
       '</div></div>' +
-      field('city', 'Город', 'placeholder="Например: Махачкала" autocomplete="address-level2" enterkeyhint="next"', f.city) +
+      (curDelivery().id === 'pickup' ? '<p class="field__note">' + esc(curDelivery().note || '') + '</p>'
+        : curDelivery().id === 'courier' ? '<p class="field__note">' + esc(curDelivery().note || '') + '</p>' + field('address', 'Адрес доставки', 'placeholder="Каспийск или Махачкала, улица, дом" autocomplete="street-address" enterkeyhint="next"', f.address)
+        : field('city', 'Город', 'placeholder="Например: Махачкала" autocomplete="address-level2" enterkeyhint="next"', f.city)) +
       '<div class="field"><label for="i-comment">Комментарий</label><textarea class="input" id="i-comment" data-f="comment" rows="2" placeholder="Вкус протеина, удобный пункт выдачи, время для звонка">' + esc(f.comment) + '</textarea></div>';
     if (Object.keys(CFG.PROMO_CODES).length) {
       h += '<div class="field' + (ui.promoErr ? ' is-bad' : '') + '"><label for="promo">Промокод</label><div class="promo">' +
@@ -437,8 +452,9 @@
       h += '<div class="pd__why"><div class="pd__why-top">' + evBars(a.ev) + '<span>' + esc(a.title) + ': доказательность ' + EV[a.ev].name + '</span></div>' +
         '<p>' + esc(a.short) + '</p><button class="link" data-act="article" data-id="' + a.id + '">Разбор в базе знаний ' + I.right + '</button></div>';
     }
-    h += '<div class="pd__buy"><span class="price">' + rub(p.price) + '</span>';
+    h += '<div class="pd__buy"><span class="price">' + price(p) + '</span>';
     if (p.stock === false) h += '<button class="btn" disabled>Нет в наличии</button>';
+    else if (!p.price) h += '<button class="btn btn--amber" data-act="link" data-id="' + esc(askUrl(p)) + '">Узнать цену</button>';
     else if (q) h += buyCtl(p);
     else h += '<button class="btn btn--amber" data-act="add" data-id="' + p.id + '">В корзину</button>';
     return h + '</div></div>';
@@ -464,7 +480,7 @@
     }).join('');
     if (prods.length) h += '<p class="res-h">Товары</p>' + prods.map(function (p) {
       return '<div class="res" data-act="product" data-id="' + p.id + '"><div class="res__main"><p class="res__t">' + esc(p.name) + '</p>' +
-        '<p class="res__s">' + esc(BRANDS[p.brand]) + ', ' + esc(p.size) + '</p></div><span class="price">' + rub(p.price) + '</span>' + buyCtl(p) + '</div>';
+        '<p class="res__s">' + esc(BRANDS[p.brand]) + ', ' + esc(p.size) + '</p></div><span class="price">' + price(p) + '</span>' + buyCtl(p) + '</div>';
     }).join('');
     return h;
   }
@@ -585,9 +601,12 @@
   }
   function validate() {
     var f = state.form, e = {};
-    if (f.name.trim().split(/\s+/).filter(function (w) { return w.length > 1; }).length < 2) e.name = 'Укажите фамилию и имя как в паспорте: по ним выдают посылку';
+    if (isLocal()) { if (f.name.trim().length < 2) e.name = 'Напишите, как к вам обращаться'; }
+    else if (f.name.trim().split(/\s+/).filter(function (w) { return w.length > 1; }).length < 2) e.name = 'Укажите фамилию и имя как в паспорте: по ним выдают посылку';
     if (f.phone.replace(/\D/g, '').length !== 11) e.phone = 'Введите номер полностью, 10 цифр после +7';
-    if (f.city.trim().length < 2) e.city = 'Укажите город, куда отправить заказ';
+    var d = curDelivery();
+    if (d.id === 'courier') { if (f.address.trim().length < 5) e.address = 'Укажите город (Каспийск или Махачкала), улицу и дом'; }
+    else if (!d.local && f.city.trim().length < 2) e.city = 'Укажите город, куда отправить заказ';
     return e;
   }
   function orderText(o) {
@@ -595,7 +614,7 @@
     return 'Заказ ' + o.id + '\n\n' +
       o.items.map(function (i, n) { return (n + 1) + '. ' + i.name + ' (' + i.brand + '), ' + i.size + ' × ' + i.qty + ' = ' + (i.price * i.qty) + ' ₽'; }).join('\n') +
       '\n\n' + (o.discount ? 'Скидка по промокоду ' + o.promo + ': −' + o.discount + ' ₽\n' : '') + 'Итого: ' + o.total + ' ₽\n\n' +
-      'Получатель: ' + o.name + '\nТелефон: ' + o.phone + '\nДоставка: ' + (dl ? dl.title : o.delivery) + ', ' + o.city +
+      'Получатель: ' + o.name + '\nТелефон: ' + o.phone + '\nДоставка: ' + (dl ? dl.title : o.delivery) + (o.delivery === 'courier' ? ', ' + o.address : o.delivery === 'pickup' ? '' : ', ' + o.city) +
       (o.comment ? '\nКомментарий: ' + o.comment : '');
   }
   function submitOrder() {
@@ -615,7 +634,7 @@
       date: new Date().toISOString(),
       items: t.lines.map(function (l) { return { id: l.p.id, name: l.p.name, brand: BRANDS[l.p.brand], size: l.p.size, price: l.p.price, qty: l.qty }; }),
       subtotal: t.subtotal, promo: state.promo, discount: t.discount, total: t.total,
-      name: f.name.trim(), phone: f.phone, delivery: f.delivery, city: f.city.trim(), comment: f.comment.trim(),
+      name: f.name.trim(), phone: f.phone, delivery: f.delivery, city: f.city.trim(), address: (f.address || '').trim(), comment: f.comment.trim(),
       tg: u ? { id: u.id, username: u.username || '' } : null
     };
     ui.sending = true; render();
@@ -668,7 +687,7 @@
     back: back,
     close: closeSheet,
     top: function () { window.scrollTo({ top: 0, behavior: 'smooth' }); },
-    brand: function (id) { ui.brand = id; render(); },
+    goal: function (id) { ui.goal = id; render(); },
     kbg: function (id) { ui.kbGroup = id; render(); },
     search: function () { openSheet({ type: 'search', q: '' }); },
     cats: function () { openSheet({ type: 'cats' }); },
@@ -679,7 +698,7 @@
     },
     product: function (id) { openSheet({ type: 'product', id: id }); },
     article: function (id) { go('kb', { type: 'article', id: id }); },
-    link: function (url) { openLink(url); },
+    link: function (url) { if (url.indexOf('https://t.me/') === 0) openTg(url); else openLink(url); },
     add: function (id) { setQty(id, 1); haptic(); toast('Добавлено в корзину'); refreshAfterCart(); },
     inc: function (id) { setQty(id, (state.cart[id] || 0) + 1); haptic(); refreshAfterCart(); },
     dec: function (id) { setQty(id, (state.cart[id] || 0) - 1); haptic(); refreshAfterCart(); },
@@ -785,8 +804,8 @@
   /* ---------- Telegram ---------- */
   if (tg) {
     try { tg.ready(); tg.expand(); } catch (e) { /* ignore */ }
-    try { tg.setHeaderColor('#171310'); tg.setBackgroundColor('#171310'); } catch (e) { /* ignore */ }
-    try { if (tg.setBottomBarColor) tg.setBottomBarColor('#171310'); } catch (e) { /* ignore */ }
+    try { tg.setHeaderColor('#1a1c14'); tg.setBackgroundColor('#1a1c14'); } catch (e) { /* ignore */ }
+    try { if (tg.setBottomBarColor) tg.setBottomBarColor('#1a1c14'); } catch (e) { /* ignore */ }
     try { if (tg.disableVerticalSwipes) tg.disableVerticalSwipes(); } catch (e) { /* ignore */ }
     try { tg.BackButton.onClick(back); } catch (e) { /* ignore */ }
   }

@@ -21,16 +21,29 @@
     // Пример: PROMO_CODES: { BIZON10: 10 }
     PROMO_CODES: {},
 
+    // local: true — доставка по городу: достаточно имени, город не спрашиваем.
     DELIVERY: [
+      { id: 'pickup', title: 'Самовывоз', local: true, note: 'Самовывоз в Каспийске. Менеджер напишет адрес и время, когда заказ будет готов.' },
+      { id: 'courier', title: 'Курьер', local: true, note: 'Курьер по Каспийску и Махачкале.' },
       { id: 'cdek', title: 'СДЭК' },
       { id: 'post', title: 'Почта России' }
+    ],
+
+    // Фильтры каталога по цели. cats — разделы, которые попадают в цель.
+    // Чтобы точно указать цель товару, добавьте ему поле goals: ['mass', 'strength'].
+    GOALS: [
+      { id: 'mass', title: 'Набор массы', cats: ['gainer', 'protein', 'creatine'] },
+      { id: 'cut', title: 'Сушка', cats: ['protein', 'amino'] },
+      { id: 'strength', title: 'Сила', cats: ['creatine', 'pre'] },
+      { id: 'health', title: 'Здоровье', cats: ['vitamins', 'health'] },
+      { id: 'start', title: 'Новичку', cats: ['protein', 'creatine'] }
     ],
 
     // Тексты раздела «О магазине»
     ABOUT: [
       { title: 'Как проходит заказ', text: 'Соберите корзину и оставьте контакты. Менеджер напишет вам в Telegram, подтвердит наличие, стоимость доставки и способ оплаты.' },
-      { title: 'Бренды', text: 'Сейчас в каталоге три базовых бренда: Optimum Nutrition, Scitec Nutrition и NOW Foods.' },
-      { title: 'Цены', text: 'Цены в каталоге ориентировочные. Точную сумму менеджер подтвердит перед оплатой.' }
+      { title: 'Только оригинал', text: 'Проверяем каждую партию. Biopharm, YLP, Kevin Levrone, Olimp, Scitec, BSN, Maxler, 1RULE, Hiprotein, NOW.' },
+      { title: 'Цены и наличие', text: 'Цены — как в нашем Telegram-канале. Наличие и вкусы менеджер подтвердит перед оплатой.' }
     ]
   };
 })(typeof window !== 'undefined' ? window : globalThis);
