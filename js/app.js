@@ -28,13 +28,13 @@
   var STORE_KEY = 'bizon:v1';
   var state = {
     cart: {}, fav: [], orders: [], stack: [], log: {}, promo: '',
-    form: { name: '', phone: '', delivery: CFG.DELIVERY[0].id, city: '', address: '', comment: '' }
+    form: { name: '', phone: '', delivery: CFG.DELIVERY[0].id, city: '', address: '', point: '', comment: '' }
   };
   try {
     var saved = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
     if (saved && typeof saved === 'object') {
       Object.keys(state).forEach(function (k) { if (saved[k] != null) state[k] = saved[k]; });
-      state.form = Object.assign({ name: '', phone: '', delivery: CFG.DELIVERY[0].id, city: '', address: '', comment: '' }, saved.form || {});
+      state.form = Object.assign({ name: '', phone: '', delivery: CFG.DELIVERY[0].id, city: '', address: '', point: '', comment: '' }, saved.form || {});
     }
   } catch (e) { /* хранилище недоступно — работаем без сохранения */ }
   Object.keys(state.cart).forEach(function (id) { if (!byId[id] || byId[id].stock === false || !byId[id].price) delete state.cart[id]; });
@@ -250,7 +250,8 @@
     }).join('') + '</div>';
 
     var free = CFG.FREE_DELIVERY_FROM;
-    if (free > 0) {
+    var pickup = curDelivery().id === 'pickup';
+    if (free > 0 && !pickup) {
       var left = free - t.total;
       h += '<div class="progress"><div class="progress__track"><div class="progress__fill" style="width:' + Math.min(100, Math.round(t.total / free * 100)) + '%"></div></div>' +
         '<p class="progress__note">' + (left > 0 ? 'До бесплатной доставки осталось <b>' + rub(left) + '</b>' : '<b>Доставка бесплатная</b>') + '</p></div>';
@@ -266,8 +267,11 @@
       '</div></div>' +
       (curDelivery().id === 'pickup' ? '<p class="field__note">' + esc(curDelivery().note || '') + '</p>'
         : curDelivery().id === 'courier' ? '<p class="field__note">' + esc(curDelivery().note || '') + '</p>' + field('address', 'Адрес доставки', 'placeholder="Каспийск или Махачкала, улица, дом" autocomplete="street-address" enterkeyhint="next"', f.address)
-        : field('city', 'Город', 'placeholder="Например: Махачкала" autocomplete="address-level2" enterkeyhint="next"', f.city)) +
-      '<div class="field"><label for="i-comment">Комментарий</label><textarea class="input" id="i-comment" data-f="comment" rows="2" placeholder="Вкус протеина, удобный пункт выдачи, время для звонка">' + esc(f.comment) + '</textarea></div>';
+        : field('city', 'Город', 'placeholder="Например: Махачкала" autocomplete="address-level2" enterkeyhint="next"', f.city) +
+          (curDelivery().id === 'post'
+            ? field('point', 'Адрес и индекс', 'placeholder="Улица, дом, квартира, индекс" autocomplete="street-address" enterkeyhint="next"', f.point || '')
+            : field('point', 'Пункт выдачи СДЭК', 'placeholder="Адрес пункта или «ближайший»" enterkeyhint="next"', f.point || ''))) +
+      '<div class="field"><label for="i-comment">Комментарий</label><textarea class="input" id="i-comment" data-f="comment" rows="2" placeholder="Вкус протеина, время для звонка">' + esc(f.comment) + '</textarea></div>';
     if (Object.keys(CFG.PROMO_CODES).length) {
       h += '<div class="field' + (ui.promoErr ? ' is-bad' : '') + '"><label for="promo">Промокод</label><div class="promo">' +
         '<input class="input" id="promo" value="' + esc(state.promo || ui.promoInput) + '" placeholder="Если есть" autocapitalize="characters" autocomplete="off">' +
@@ -279,7 +283,7 @@
     h += '<div class="sum">' +
       '<div class="sum__row"><span>Товары, ' + t.count + ' шт.</span><b>' + rub(t.subtotal) + '</b></div>' +
       (t.discount ? '<div class="sum__row"><span>Скидка ' + t.pct + '% по промокоду</span><b>−' + rub(t.discount) + '</b></div>' : '') +
-      '<div class="sum__row"><span>Доставка</span><b>' + (free > 0 && t.total >= free ? 'Бесплатно' : 'Рассчитает менеджер') + '</b></div>' +
+      '<div class="sum__row"><span>Доставка</span><b>' + (pickup ? 'Не нужна' : free > 0 && t.total >= free ? 'Бесплатно' : 'Рассчитает менеджер') + '</b></div>' +
       '<div class="sum__row sum__row--total"><span>Итого</span><b>' + rub(t.total) + '</b></div></div>' +
       '<p class="fine">Оплата не списывается. После оформления менеджер напишет вам, подтвердит наличие и итоговую сумму.</p>' +
       '<button class="btn btn--amber" data-act="order"' + (ui.sending ? ' disabled' : '') + '>' + (ui.sending ? 'Отправляем заказ' : 'Оформить заказ') + '</button>';
@@ -466,14 +470,52 @@
       return n ? '<button data-act="goto" data-id="' + c.id + '"><b>' + esc(c.title) + '</b><span>' + n + '</span></button>' : '';
     }).join('') + '</div></div>';
   }
-  function searchResults(q) {
-    q = q.trim().toLowerCase();
-    if (q.length < 2) return '<p class="res-h">Введите название товара или добавки: креатин, омега, whey.</p>';
-    var prods = PRODUCTS.filter(function (p) {
-      var a = kbById[p.kb];
-      return (p.name + ' ' + BRANDS[p.brand] + ' ' + catById[p.cat].title + ' ' + (a ? a.title : '')).toLowerCase().indexOf(q) >= 0;
+  // Поиск прощает раскладку и опечатки: всё переводится в латиницу (витамин д = vitamin d, креатин = kreatin),
+  // ё = е, й = и, а слово от 5 букв может отличаться от названия на одну букву (креатинн, геинер).
+  var TRANSLIT = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'i', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'c', ч: 'ch', ш: 'sh', щ: 'sh', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya' };
+  function normSearch(s) {
+    return String(s).toLowerCase().replace(/[а-яё]/g, function (ch) { return TRANSLIT[ch]; })
+      .replace(/[^a-z0-9]+/g, ' ').trim();
+  }
+  function within1(a, b) {
+    if (Math.abs(a.length - b.length) > 1) return false;
+    var i = 0, j = 0, diff = 0;
+    while (i < a.length && j < b.length) {
+      if (a[i] === b[j]) { i++; j++; continue; }
+      if (++diff > 1) return false;
+      if (a.length > b.length) i++; else if (b.length > a.length) j++; else { i++; j++; }
+    }
+    return diff + (a.length - i) + (b.length - j) <= 1;
+  }
+  function tokenHit(tok, words, hay) {
+    if (tok.length === 1) return words.some(function (w) { return w.charAt(0) === tok; });
+    if (hay.indexOf(tok) >= 0) return true;
+    return tok.length >= 5 && words.some(function (w) {
+      return w.charAt(0) === tok.charAt(0) && w.length >= 4 && (within1(tok, w) || within1(tok, w.slice(0, tok.length)));
     });
-    var arts = KB.filter(function (a) { return (a.title + ' ' + a.short).toLowerCase().indexOf(q) >= 0; });
+  }
+  // exact: точное совпадение строки запроса; иначе — по словам с допуском опечатки (запасной вариант)
+  function searchMatch(q, text, exact) {
+    var hay = normSearch(text);
+    if (exact) return hay.indexOf(q) >= 0;
+    var words = hay.split(' ');
+    return q.split(' ').every(function (t) { return tokenHit(t, words, hay); });
+  }
+  function searchResults(raw) {
+    var q = normSearch(raw);
+    if (raw.trim().length < 2 || !q) return '<p class="res-h">Введите название товара или добавки: креатин, омега, whey.</p>';
+    function find(exact) {
+      return {
+        prods: PRODUCTS.filter(function (p) {
+          var a = kbById[p.kb];
+          return searchMatch(q, p.name + ' ' + BRANDS[p.brand] + ' ' + catById[p.cat].title + ' ' + (a ? a.title : ''), exact);
+        }),
+        arts: KB.filter(function (a) { return searchMatch(q, a.title + ' ' + a.short, exact); })
+      };
+    }
+    var r = find(true);
+    if (!r.prods.length && !r.arts.length) r = find(false);
+    var prods = r.prods, arts = r.arts;
     if (!prods.length && !arts.length) return '<p class="res-h">Ничего не нашлось. Попробуйте другое название.</p>';
     var h = '';
     if (arts.length) h += '<p class="res-h">База знаний</p>' + arts.map(function (a) {
@@ -607,7 +649,11 @@
     if (f.phone.replace(/\D/g, '').length !== 11) e.phone = 'Введите номер полностью, 10 цифр после +7';
     var d = curDelivery();
     if (d.id === 'courier') { if (f.address.trim().length < 5) e.address = 'Укажите город (Каспийск или Махачкала), улицу и дом'; }
-    else if (!d.local && f.city.trim().length < 2) e.city = 'Укажите город, куда отправить заказ';
+    else if (!d.local) {
+      if (f.city.trim().length < 2) e.city = 'Укажите город, куда отправить заказ';
+      if (d.id === 'post' && !/(^|\D)\d{6}(\D|$)/.test(f.point || '')) e.point = 'Укажите улицу, дом, квартиру и индекс (6 цифр)';
+      else if (d.id === 'post' && (f.point || '').replace(/\d{6}/, '').trim().length < 5) e.point = 'Укажите улицу, дом и квартиру';
+    }
     return e;
   }
   function orderText(o) {
@@ -615,7 +661,7 @@
     return 'Заказ ' + o.id + '\n\n' +
       o.items.map(function (i, n) { return (n + 1) + '. ' + i.name + ' (' + i.brand + '), ' + i.size + ' × ' + i.qty + ' = ' + (i.price * i.qty) + ' ₽'; }).join('\n') +
       '\n\n' + (o.discount ? 'Скидка по промокоду ' + o.promo + ': −' + o.discount + ' ₽\n' : '') + 'Итого: ' + o.total + ' ₽\n\n' +
-      'Получатель: ' + o.name + '\nТелефон: ' + o.phone + '\nДоставка: ' + (dl ? dl.title : o.delivery) + (o.delivery === 'courier' ? ', ' + o.address : o.delivery === 'pickup' ? '' : ', ' + o.city) +
+      'Получатель: ' + o.name + '\nТелефон: ' + o.phone + '\nДоставка: ' + (dl ? dl.title : o.delivery) + (o.delivery === 'courier' ? ', ' + o.address : o.delivery === 'pickup' ? '' : ', ' + o.city + (o.point ? ', ' + o.point : '')) +
       (o.comment ? '\nКомментарий: ' + o.comment : '');
   }
   function submitOrder() {
@@ -635,7 +681,7 @@
       date: new Date().toISOString(),
       items: t.lines.map(function (l) { return { id: l.p.id, name: l.p.name, brand: BRANDS[l.p.brand], size: l.p.size, price: l.p.price, qty: l.qty }; }),
       subtotal: t.subtotal, promo: state.promo, discount: t.discount, total: t.total,
-      name: f.name.trim(), phone: f.phone, delivery: f.delivery, city: f.city.trim(), address: (f.address || '').trim(), comment: f.comment.trim(),
+      name: f.name.trim(), phone: f.phone, delivery: f.delivery, city: f.city.trim(), address: (f.address || '').trim(), point: f.delivery === 'cdek' || f.delivery === 'post' ? (f.point || '').trim() : '', comment: f.comment.trim(),
       tg: u ? { id: u.id, username: u.username || '' } : null
     };
     ui.sending = true; render();
